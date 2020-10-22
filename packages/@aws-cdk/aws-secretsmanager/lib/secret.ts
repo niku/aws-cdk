@@ -237,6 +237,20 @@ abstract class SecretBase extends Resource implements ISecret {
   protected get arnForPolicies() { return this.secretArn; }
 }
 
+/** Options for `Secret.fromSecretName` */
+export interface SecretFromSecretNameOptions {
+  /**
+   * Whether the secret imported by name will respond with a "partial" ARN without the Secrets Manager suffix.
+   * If this is set, `secretArn` will return a composed ARN without the Secrets Manager suffix.
+   * If not set, 'secretArn' will return the `secretName`.
+   * Some service integrations accept either the `secretName` or the full ARN with the suffix, whereas others
+   * accept the partial ARN. This parameter allows controlling which version of the ARN the service receives.
+   *
+   * @default - false
+   */
+  readonly supportPartialSecretArn?: boolean;
+}
+
 /**
  * Creates a new secret in AWS SecretsManager.
  */
@@ -250,19 +264,23 @@ export class Secret extends SecretBase {
    * Imports a secret by secret name; the ARN of the Secret will be set to the secret name.
    * A secret with this name must exist in the same account & region.
    */
-  public static fromSecretName(scope: Construct, id: string, secretName: string): ISecret {
+  public static fromSecretName(scope: Construct, id: string, secretName: string, options: SecretFromSecretNameOptions = {}): ISecret {
     return new class extends SecretBase {
       public readonly encryptionKey = undefined;
-      public readonly secretArn = secretName;
+      public readonly secretArn = options.supportPartialSecretArn ? this.partialArn : secretName;
       public readonly secretName = secretName;
       protected readonly autoCreatePolicy = false;
       // Overrides the secretArn for grant* methods, where the secretArn must be in ARN format.
       // Also adds a wildcard to the resource name to support the SecretsManager-provided suffix.
       protected get arnForPolicies() {
+        return this.partialArn + '*';
+      }
+      // Creates a "partial" ARN from the secret name. The "full" ARN would include the SecretsManager-provided suffix.
+      private get partialArn(): string {
         return Stack.of(this).formatArn({
           service: 'secretsmanager',
           resource: 'secret',
-          resourceName: this.secretName + '*',
+          resourceName: secretName,
           sep: ':',
         });
       }
@@ -299,8 +317,8 @@ export class Secret extends SecretBase {
     });
 
     if (props.generateSecretString &&
-        (props.generateSecretString.secretStringTemplate || props.generateSecretString.generateStringKey) &&
-        !(props.generateSecretString.secretStringTemplate && props.generateSecretString.generateStringKey)) {
+      (props.generateSecretString.secretStringTemplate || props.generateSecretString.generateStringKey) &&
+      !(props.generateSecretString.secretStringTemplate && props.generateSecretString.generateStringKey)) {
       throw new Error('`secretStringTemplate` and `generateStringKey` must be specified together.');
     }
 
@@ -604,9 +622,13 @@ function parseSecretName(construct: IConstruct, secretArn: string) {
       return resourceName;
     }
 
-    // Secret resource names are in the format `${secretName}-${SecretsManager suffix}`
-    // If there is no hyphen, assume no suffix was provided, and return the whole name.
-    return resourceName.substr(0, resourceName.lastIndexOf('-')) || resourceName;
+    // Secret resource names are in the format `${secretName}-${6-character SecretsManager suffix}`
+    // If there is no hyphen (or 6-character suffix) assume no suffix was provided, and return the whole name.
+    const lastHyphenIndex = resourceName.lastIndexOf('-');
+    if (lastHyphenIndex !== -1 && resourceName.substr(lastHyphenIndex + 1).length === 6) {
+      return resourceName.substr(0, lastHyphenIndex);
+    }
+    return resourceName;
   }
   throw new Error('invalid ARN format; no secret name provided');
 }

@@ -163,6 +163,8 @@ Existing secrets can be imported by ARN, name, and other attributes (including t
 Secrets imported by name can used the short-form of the name (without the SecretsManager-provided suffx);
 the secret name must exist in the same account and region as the stack.
 Importing by name makes it easier to reference secrets created in different regions, each with their own suffix and ARN.
+However, different services have different requirements for referencing secrets by name. The `supportPartialSecretArn` changes
+how the `secretArn` is calculated from the `secretName`.
 
 ```ts
 import * as kms from '@aws-cdk/aws-kms';
@@ -170,10 +172,17 @@ import * as kms from '@aws-cdk/aws-kms';
 const secretArn = 'arn:aws:secretsmanager:eu-west-1:111111111111:secret:MySecret-f3gDy9';
 const encryptionKey = kms.Key.fromKeyArn(stack, 'MyEncKey', 'arn:aws:kms:eu-west-1:111111111111:key/21c4b39b-fde2-4273-9ac0-d9bb5c0d0030');
 const mySecretFromArn = secretsmanager.Secret.fromSecretArn(stack, 'SecretFromArn', secretArn);
-const mySecretFromName = secretsmanager.Secret.fromSecretName(stack, 'SecretFromName', 'MySecret') // Note: the -f3gDy9 suffix is optional
 const mySecretFromAttrs = secretsmanager.Secret.fromSecretAttributes(stack, 'SecretFromAttributes', {
   secretArn,
   encryptionKey,
-  secretName: 'MySecret', // Optional, will be calculated from the ARN
+});
+
+// The secretArn will be the secretName. Works with services like CodeBuild.
+const mySecretFromName = secretsmanager.Secret.fromSecretName(stack, 'SecretFromName', 'MySecret');
+// The secretArn will be in ARN format, but without the SecretsManager suffix
+// (e.g., 'arn:aws:secretsmanager:eu-west-1:111111111111:secret:MySecret')
+// Works with services like ECS.
+const mySecretFromName = secretsmanager.Secret.fromSecretName(stack, 'SecretFromName', 'MySecret', {
+  supportPartialSecretArn: true,
 });
 ```

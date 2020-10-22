@@ -460,6 +460,18 @@ test('import by secretArn supports secret ARNs without suffixes', () => {
   expect(secret.secretName).toBe('MySecret');
 });
 
+test('import by secretArn does not strip suffixes unless the suffix length is six', () => {
+  // GIVEN
+  const arnWith5CharacterSuffix = 'arn:aws:secretsmanager:eu-west-1:111111111111:secret:github-token';
+  const arnWith6CharacterSuffix = 'arn:aws:secretsmanager:eu-west-1:111111111111:secret:github-token-f3gDy9';
+  const arnWithMultiple6CharacterSuffix = 'arn:aws:secretsmanager:eu-west-1:111111111111:secret:github-token-f3gDy9-acb123';
+
+  // THEN
+  expect(secretsmanager.Secret.fromSecretArn(stack, 'Secret5', arnWith5CharacterSuffix).secretName).toEqual('github-token');
+  expect(secretsmanager.Secret.fromSecretArn(stack, 'Secret6', arnWith6CharacterSuffix).secretName).toEqual('github-token');
+  expect(secretsmanager.Secret.fromSecretArn(stack, 'Secret6Twice', arnWithMultiple6CharacterSuffix).secretName).toEqual('github-token-f3gDy9');
+});
+
 test('import by secretArn supports tokens for ARNs', () => {
   // GIVEN
   const app = new cdk.App();
@@ -511,10 +523,88 @@ test('import by secret name', () => {
   expect(stack.resolve(secret.secretValueFromJson('password'))).toBe(`{{resolve:secretsmanager:${secretName}:SecretString:password::}}`);
 });
 
+test('import by secret name - supportPartialSecretArn', () => {
+  // GIVEN
+  const secretName = 'MySecret';
+
+  // WHEN
+  const secret = secretsmanager.Secret.fromSecretName(stack, 'Secret', secretName, { supportPartialSecretArn: true });
+
+  // THEN
+  expect(secret.secretArn).toBe(`arn:${stack.partition}:secretsmanager:${stack.region}:${stack.account}:secret:MySecret`);
+  expect(secret.secretName).toBe(secretName);
+  expect(stack.resolve(secret.secretValue)).toEqual({
+    'Fn::Join': ['', [
+      '{{resolve:secretsmanager:arn:',
+      { Ref: 'AWS::Partition' },
+      ':secretsmanager:',
+      { Ref: 'AWS::Region' },
+      ':',
+      { Ref: 'AWS::AccountId' },
+      ':secret:MySecret:SecretString:::}}',
+    ]],
+  });
+  expect(stack.resolve(secret.secretValueFromJson('password'))).toEqual({
+    'Fn::Join': ['', [
+      '{{resolve:secretsmanager:arn:',
+      { Ref: 'AWS::Partition' },
+      ':secretsmanager:',
+      { Ref: 'AWS::Region' },
+      ':',
+      { Ref: 'AWS::AccountId' },
+      ':secret:MySecret:SecretString:password::}}',
+    ]],
+  });
+});
+
 test('import by secret name with grants', () => {
   // GIVEN
   const role = new iam.Role(stack, 'Role', { assumedBy: new iam.AccountRootPrincipal() });
   const secret = secretsmanager.Secret.fromSecretName(stack, 'Secret', 'MySecret');
+
+  // WHEN
+  secret.grantRead(role);
+  secret.grantWrite(role);
+
+  // THEN
+  const expectedSecretReference = {
+    'Fn::Join': ['', [
+      'arn:',
+      { Ref: 'AWS::Partition' },
+      ':secretsmanager:',
+      { Ref: 'AWS::Region' },
+      ':',
+      { Ref: 'AWS::AccountId' },
+      ':secret:MySecret*',
+    ]],
+  };
+  expect(stack).toHaveResource('AWS::IAM::Policy', {
+    PolicyDocument: {
+      Version: '2012-10-17',
+      Statement: [{
+        Action: [
+          'secretsmanager:GetSecretValue',
+          'secretsmanager:DescribeSecret',
+        ],
+        Effect: 'Allow',
+        Resource: expectedSecretReference,
+      },
+      {
+        Action: [
+          'secretsmanager:PutSecretValue',
+          'secretsmanager:UpdateSecret',
+        ],
+        Effect: 'Allow',
+        Resource: expectedSecretReference,
+      }],
+    },
+  });
+});
+
+test('import by secret name with grants - supportPartialSecretArn', () => {
+  // GIVEN
+  const role = new iam.Role(stack, 'Role', { assumedBy: new iam.AccountRootPrincipal() });
+  const secret = secretsmanager.Secret.fromSecretName(stack, 'Secret', 'MySecret', { supportPartialSecretArn: true });
 
   // WHEN
   secret.grantRead(role);

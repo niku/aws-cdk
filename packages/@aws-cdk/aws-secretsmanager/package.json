@@ -103,6 +103,7 @@
   "awslint": {
     "exclude": [
       "attribute-tag:@aws-cdk/aws-secretsmanager.Secret.secretName",
+      "from-signature:@aws-cdk/aws-secretsmanager.Secret.fromSecretName",
       "from-signature:@aws-cdk/aws-secretsmanager.SecretTargetAttachment.fromSecretTargetAttachmentSecretArn",
       "from-attributes:fromSecretTargetAttachmentAttributes",
       "props-physical-name:@aws-cdk/aws-secretsmanager.RotationScheduleProps",
